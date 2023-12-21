@@ -1,7 +1,11 @@
-use axum::{routing::get, routing::delete, Router};
-use bb8::Pool;
+use axum::{
+    routing::{get, delete, post},
+    Router
+};
+
+use bb8::{Pool, ManageConnection};
 use bb8_postgres::PostgresConnectionManager;
-use tokio_postgres::NoTls;
+use tokio_postgres::{NoTls, Client};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 pub mod api;
@@ -11,7 +15,31 @@ use crate::api::users::api::*;
 use crate::api::testable::api::*;
 use crate::types::AppState;
 
-use std::fs;
+async fn run_migrations(client: &mut Client) {
+    mod embedded {
+        use refinery::embed_migrations;
+        embed_migrations!("./migrations");
+    }
+
+    
+
+    let migration_report = embedded::migrations::runner()
+        .run_async(client)
+        .await
+        .unwrap();
+
+    println!("{:?}", migration_report);
+
+    for migration in migration_report.applied_migrations() {
+        println!(
+            "Migration Applied -  Name: {}, Version: {}",
+            migration.name(),
+            migration.version()
+        );
+    }
+
+    println!("DB migrations finished!");
+}
 
 #[tokio::main]
 async fn main() {
@@ -23,16 +51,17 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    
+    let contents = tokio::fs::read("postgres").await.unwrap();
+    let postgres_config: String = String::from_utf8_lossy(&contents).parse().unwrap();
 
     // set up connection pool
-    let manager = PostgresConnectionManager::new_from_stringlike("host=localhost user=postgres dbname=", NoTls).unwrap();
+    let manager = PostgresConnectionManager::new_from_stringlike(postgres_config, NoTls).unwrap();
+    let mut client = manager.connect().await.unwrap();
+
+    run_migrations(&mut client).await;
 
     let pool = Pool::builder().build(manager).await.unwrap();
-
-    let state = AppState {
-        pool: pool
-    };
+    let state = AppState { pool };
 
     // build our application with some routes
     let level_0_access = Router::new()
@@ -53,7 +82,10 @@ async fn main() {
         .route(
             "/users",
             delete(delete_user)
-            .post(promote_user)
+        )
+        .route(
+            "/promote",
+            post(promote_user)
         )
         .with_state(state.clone());
 

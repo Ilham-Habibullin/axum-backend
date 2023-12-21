@@ -12,7 +12,7 @@ use crate::types::{
 
 use crate::api::users::types::*;
 
-const USER_TABLE_NAME: &'static str = "users_ax";
+const USER_TABLE_NAME: &'static str = "users";
 
 pub async fn get_users(
   pagination: Query<Pagination>,
@@ -113,5 +113,13 @@ pub async fn promote_user(
     payload: Query<PromoteUserPayload>,
     State(state): State<AppState>,
 ) -> Result<Json<User>, (StatusCode, String)> {
-    
+
+
+    let user = User {
+        id: 1,
+        username: "none".to_string(),
+        password: "none".to_string()
+    };
+
+    Ok(Json(user))
 }
