@@ -1,0 +1,1 @@
+ALTER TABLE users ADD column role smallint NOT NULL DEFAULT 0
