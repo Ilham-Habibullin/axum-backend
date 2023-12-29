@@ -1,10 +1,5 @@
 use serde::{Deserialize, Serialize};
-
-#[derive(Deserialize)]
-pub struct CreateUserPayload {
-  pub username: String,
-  pub password: String,
-}
+use crate::types::Roles;
 
 #[derive(Deserialize)]
 pub struct DeleteUserPayload {
@@ -12,10 +7,18 @@ pub struct DeleteUserPayload {
 }
 
 #[derive(Deserialize, Serialize)]
+pub struct UserWithPassword {
+  pub id: i32,
+  pub username: String,
+  pub password: String,
+  pub role: Roles
+}
+
+#[derive(Clone, Deserialize, Serialize, Debug)]
 pub struct User {
   pub id: i32,
   pub username: String,
-  pub password: String
+  pub role: Roles
 }
 
 #[derive(Deserialize)]

@@ -4,7 +4,7 @@ use bb8::Pool;
 use bb8_postgres::PostgresConnectionManager;
 use tokio_postgres::NoTls;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 pub type ConnectionPool = Pool<PostgresConnectionManager<NoTls>>;
 
@@ -21,5 +21,25 @@ pub struct Pagination {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub pool: Pool<PostgresConnectionManager<NoTls>>
+    pub pool: Pool<PostgresConnectionManager<NoTls>>,
+    pub secret: String,
+    pub salt: String
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub enum Roles {
+    Basic = 0,
+    Moderator = 1,
+    Admin = 2
+}
+
+impl From<i16> for Roles {
+    fn from(number: i16) -> Roles {
+        match number {
+            0 => Self::Basic,
+            1 => Self::Moderator,
+            2 => Self::Admin,
+            _ => panic!("Tried to convert u8 to not existing role")
+        }
+    }
 }

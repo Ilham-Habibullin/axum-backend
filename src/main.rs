@@ -1,27 +1,31 @@
 use axum::{
-    routing::{get, delete, post},
-    Router
+    Router, routing::{get, post},
+    middleware::from_fn_with_state
 };
-
 use bb8::{Pool, ManageConnection};
 use bb8_postgres::PostgresConnectionManager;
 use tokio_postgres::{NoTls, Client};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-pub mod api;
+pub mod modules;
 pub mod types;
+pub mod middleware;
 
-use crate::api::users::api::*;
-use crate::api::testable::api::*;
-use crate::types::AppState;
+use crate::modules::users::api::*;
+use crate::modules::testable::api::*;
+use crate::modules::auth::api::*;
+
+use crate::types::{AppState, Roles};
+use crate::middleware::*;
+
+pub const USER_TABLE_NAME: &'static str = "users";
+
 
 async fn run_migrations(client: &mut Client) {
     mod embedded {
         use refinery::embed_migrations;
         embed_migrations!("./migrations");
     }
-
-    
 
     let migration_report = embedded::migrations::runner()
         .run_async(client)
@@ -41,6 +45,14 @@ async fn run_migrations(client: &mut Client) {
     println!("DB migrations finished!");
 }
 
+async fn read_file(filename: &str) -> Result<String, String> {
+    let contents = tokio::fs::read(filename).await.map_err(|e| e.to_string())?;
+    let parsed = String::from_utf8_lossy(&contents).to_string();
+    return Ok(parsed)
+}
+
+
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::registry()
@@ -51,8 +63,11 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let contents = tokio::fs::read("postgres").await.unwrap();
-    let postgres_config: String = String::from_utf8_lossy(&contents).parse().unwrap();
+    let (postgres_config, jwt_secret, salt) = tokio::try_join!(
+        read_file("postgres"),
+        read_file("jwt_secret"),
+        read_file("salt")
+    ).unwrap();
 
     // set up connection pool
     let manager = PostgresConnectionManager::new_from_stringlike(postgres_config, NoTls).unwrap();
@@ -61,37 +76,35 @@ async fn main() {
     run_migrations(&mut client).await;
 
     let pool = Pool::builder().build(manager).await.unwrap();
-    let state = AppState { pool };
+    let state = AppState {
+        pool,
+        secret: jwt_secret,
+        salt
+    };
 
     // build our application with some routes
-    let level_0_access = Router::new()
-        .route(
-            "/",
+    let app  = Router::new()
+        .route("/",
              get(using_connection_pool_extractor)
             .post(using_connection_extractor),
         )
-        .route(
-            "/users",
+        .route("/users",
              get(get_users)
-            .post(create_user)
-            
+            .delete(delete_user)
+                .route_layer(from_fn_with_state(Roles::Admin, roles::roles))
         )
-        .with_state(state.clone());
-
-    let level_1_access = Router::new()
-        .route(
-            "/users",
-            delete(delete_user)
-        )
-        .route(
-            "/promote",
+        .route("/promote",
             post(promote_user)
+                .route_layer(from_fn_with_state(Roles::Basic, roles::roles))
+                .route_layer(from_fn_with_state(state.clone(), auth::auth))
+        )
+        .nest("/auth",
+            Router::new()
+                .route("/signup", post(sign_up))
+                .route("/signin", post(sign_in))
+                .route("/signout", get(sign_out))
         )
         .with_state(state.clone());
-
-    let app = Router::new()
-        .merge(level_0_access)
-        .merge(level_1_access);
 
     // let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     // let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
@@ -99,9 +112,7 @@ async fn main() {
 
     tracing::debug!("listening on {}", addr);
 
-    axum::Server::bind(&addr)
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
+    axum::serve(listener, app.into_make_service()).await.unwrap();
 
 }
