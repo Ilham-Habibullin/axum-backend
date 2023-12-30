@@ -1,6 +1,6 @@
 use axum::{
-    Router, routing::{get, post},
-    middleware::from_fn_with_state
+    Router, routing::{get, post, delete},
+    middleware::from_fn_with_state, handler::Handler
 };
 use bb8::{Pool, ManageConnection};
 use bb8_postgres::PostgresConnectionManager;
@@ -14,6 +14,7 @@ pub mod middleware;
 use crate::modules::users::api::*;
 use crate::modules::testable::api::*;
 use crate::modules::auth::api::*;
+use crate::modules::notes::api::*;
 
 use crate::types::{AppState, Roles};
 use crate::middleware::*;
@@ -90,8 +91,7 @@ async fn main() {
         )
         .route("/users",
              get(get_users)
-            .delete(delete_user)
-                .route_layer(from_fn_with_state(Roles::Admin, roles::roles))
+            .delete(delete_user.layer(from_fn_with_state(Roles::Admin, roles::roles)))
         )
         .route("/promote",
             post(promote_user)
@@ -103,6 +103,11 @@ async fn main() {
                 .route("/signup", post(sign_up))
                 .route("/signin", post(sign_in))
                 .route("/signout", get(sign_out))
+        )
+        .route("/notes",
+             get(get_notes)
+            .delete(delete_note)
+            .post(create_note)
         )
         .with_state(state.clone());
 
