@@ -20,6 +20,7 @@ use crate::types::{AppState, Roles};
 use crate::middleware::*;
 
 pub const USER_TABLE_NAME: &'static str = "users";
+pub const NOTES_TABLE_NAME: &'static str = "notes";
 
 
 async fn run_migrations(client: &mut Client) {
@@ -59,7 +60,7 @@ async fn main() {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "axum_admin_backend=debug".into()),
+                .unwrap_or_else(|_| "axum_backend=debug".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -108,6 +109,7 @@ async fn main() {
              get(get_notes)
             .delete(delete_note)
             .post(create_note)
+            .route_layer(from_fn_with_state(state.clone(), auth::auth))
         )
         .with_state(state.clone());
 
