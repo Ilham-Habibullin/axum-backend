@@ -8,11 +8,7 @@ use bb8::PooledConnection;
 use bb8_postgres::PostgresConnectionManager;
 use tokio_postgres::NoTls;
 
-use crate::types::{
-    internal_error,
-    ConnectionPool, 
-    AppState
-};
+use crate::types::{internal_error, AppState};
 
 // we can also write a custom extractor that grabs a connection from the pool
 // which setup is appropriate depends on your application

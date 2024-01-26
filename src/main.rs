@@ -1,11 +1,14 @@
 use axum::{
-    Router, routing::{get, post, delete},
+    Router, routing::{get, post},
     middleware::from_fn_with_state, handler::Handler
 };
 use bb8::{Pool, ManageConnection};
 use bb8_postgres::PostgresConnectionManager;
 use tokio_postgres::{NoTls, Client};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use http::{Method, HeaderValue, HeaderName};
+use tower_http::cors::{CorsLayer, AllowOrigin, AllowCredentials};
 
 pub mod modules;
 pub mod types;
@@ -84,6 +87,25 @@ async fn main() {
         salt
     };
 
+
+    use http::header::{AUTHORIZATION, ACCEPT, CONTENT_TYPE, COOKIE, SET_COOKIE, CONTENT_LENGTH};
+
+    let origins = [
+        HeaderValue::from_static("http://localhost:3000"),
+        HeaderValue::from_static("http://127.0.0.1:3000"),
+        HeaderValue::from_static("http://localhost"),
+        HeaderValue::from_static("http://127.0.0.1"),
+    ];
+
+    let x_total_count = HeaderName::from_static("x-total-count");
+
+    let cors = CorsLayer::new()
+        .allow_methods([Method::GET, Method::POST, Method::DELETE])
+        .allow_origin(AllowOrigin::list(origins))
+        .allow_headers([AUTHORIZATION, ACCEPT, CONTENT_TYPE, CONTENT_LENGTH, COOKIE, SET_COOKIE])
+        .allow_credentials(AllowCredentials::yes())
+        .expose_headers([AUTHORIZATION, ACCEPT, CONTENT_TYPE, CONTENT_LENGTH, COOKIE, SET_COOKIE, x_total_count]);
+
     // build our application with some routes
     let app  = Router::new()
         .route("/",
@@ -101,6 +123,7 @@ async fn main() {
         )
         .nest("/auth",
             Router::new()
+                .route("/me", get(me).layer(from_fn_with_state(state.clone(), auth::auth)))
                 .route("/signup", post(sign_up))
                 .route("/signin", post(sign_in))
                 .route("/signout", get(sign_out))
@@ -111,7 +134,8 @@ async fn main() {
             .post(create_note)
             .route_layer(from_fn_with_state(state.clone(), auth::auth))
         )
-        .with_state(state.clone());
+        .with_state(state.clone())
+        .layer(cors);
 
     // let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
     // let addr = SocketAddr::from(([0, 0, 0, 0], 8080));

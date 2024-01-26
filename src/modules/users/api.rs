@@ -1,9 +1,10 @@
 use axum::{
     Extension,
     extract::{State, Query},
-    http::StatusCode,
-    Json
+    http::{StatusCode, HeaderValue, Response},
+    Json, response::IntoResponse, body::Body
 };
+use tokio_postgres::types::ToSql;
 
 use crate::types::{
     internal_error,
@@ -13,32 +14,60 @@ use crate::types::{
 
 use crate::modules::users::types::*;
 
+
+
+#[derive(serde::Deserialize)]
+pub struct Role {
+    pub role: Option<i16>,
+}
+
 pub async fn get_users(
     pagination: Query<Pagination>,
-    State(state): State<AppState>,
-) -> Result<Json<Vec<User>>, (StatusCode, String)> {
-    let conn = state.pool.get().await.map_err(internal_error)?;
-
+    role_option: Query<Role>,
+    state: State<AppState>,
+) -> Result<Response<Body>, (StatusCode, String)> {
     let limit = pagination.0.limit;
     let offset = pagination.0.offset;
 
-    let row = conn
-        .query(
-            &format!("SELECT id, username, role FROM {} LIMIT $1 OFFSET $2", crate::USER_TABLE_NAME), 
-            &[&limit, &offset]
-        )
-        .await
-        .map_err(internal_error)?;
+    match role_option.role {
+        None => complete_get_user(
+            format!("SELECT id, username, role FROM {} ORDER BY id LIMIT $1 OFFSET $2", crate::USER_TABLE_NAME),
+            vec![&limit, &offset], 
+            state).await,
+        Some(role) => complete_get_user(
+            format!("SELECT id, username, role FROM {} WHERE role=$3 ORDER BY id LIMIT $1 OFFSET $2 ", crate::USER_TABLE_NAME),
+            vec![&limit, &offset, &role],
+            state).await
+    }
+}
 
-    let reply: Vec<User> = row.iter().map(|r| {
-        let id = r.get(0);
-        let username = r.get(1);
-        let role = r.get::<usize, i16>(2).into();
+async fn complete_get_user(
+    query_users: String,
+    param_users: Vec<&(dyn ToSql + Sync)>,
+    state: State<AppState>
+) -> Result<Response<Body>, (StatusCode, String)> {
+    let conn = state.pool.get().await.map_err(internal_error)?;
 
-        User { id, username, role }
+    let query_count = format!("SELECT count(*) FROM {}", crate::USER_TABLE_NAME);
+
+    let (rows, row_count) = tokio::try_join!(
+        conn.query(&query_users, &param_users),
+        conn.query_one(&query_count, &[])
+    ).map_err(internal_error)?;
+
+    let reply: Vec<User> = rows.iter().map(|r| User {
+        id: r.get(0),
+        username: r.get(1),
+        role: r.get::<usize, i16>(2).into()
     }).collect();
 
-    Ok(Json(reply))
+    let count: i64 = row_count.get(0);
+    let header_count_value = HeaderValue::from_str(&count.to_string()).map_err(internal_error)?;
+
+    let mut response = Json(reply).into_response();
+    response.headers_mut().insert("x-total-count", header_count_value);
+
+    Ok(response)
 }
 
 pub async fn delete_user(
@@ -65,14 +94,12 @@ pub async fn delete_user(
     Ok(Json(deleted_user))
 }
 
-
-
 pub async fn promote_user(
-    payload: Query<PromoteUserPayload>,
-    State(state): State<AppState>,
-    Extension(user): Extension<User>
+    _payload: Query<PromoteUserPayload>,
+    State(_state): State<AppState>,
+    Extension(_user): Extension<User>
 ) -> Result<Json<User>, (StatusCode, String)> {
+    todo!();
     // let user = User { id: 1, username: "none".to_string() };
-
-    Ok(Json(user))
+    // Ok(Json(user))
 }

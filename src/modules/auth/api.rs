@@ -1,11 +1,12 @@
 use axum::{
+    Extension,
     Json,
     extract::State,
     response::IntoResponse,
     http::{StatusCode, Response, header, HeaderValue},
 };
 
-use axum_extra::extract::cookie::{Cookie, SameSite};
+use axum_extra::extract::cookie::Cookie;
 use jsonwebtoken::{encode, EncodingKey, Header};
 
 use sha256::digest;
@@ -55,7 +56,11 @@ pub async fn sign_in(
 
     let hashed_password = digest(password+salt);
 
-    let query = &format!("SELECT id, username, password, role FROM {} WHERE username = $1", crate::USER_TABLE_NAME);
+    let query = &format!(
+        "SELECT id, username, password, role FROM {} WHERE username = $1", 
+        crate::USER_TABLE_NAME
+    );
+
     let user_row = conn.query_one(query, &[&username]).await.map_err(internal_error)?;
 
     let user = UserWithPassword {
@@ -66,7 +71,7 @@ pub async fn sign_in(
     };
 
     if user.password != hashed_password {
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "User does not exist or password was wrong!".to_string()))
+        Err((StatusCode::INTERNAL_SERVER_ERROR, "User does not exist or password was wrong!".to_string()))
     } else {
         let now = chrono::Utc::now();
         let iat = now.timestamp() as usize;
@@ -85,24 +90,46 @@ pub async fn sign_in(
             &Header::default(),
             &claims,
             &EncodingKey::from_secret(x)
-        )
-        .unwrap();
+        ).unwrap();
 
         let cookie = Cookie::build(("token", token))
             .path("/")
-            .max_age(time::Duration::hours(1))
-            .same_site(SameSite::Lax)
-            .http_only(true);
+            .max_age(time::Duration::hours(3))
+            // .same_site(SameSite::None)
+            .secure(false)
+            .http_only(false);
 
         let header_cookie_value = HeaderValue::from_str(&cookie.to_string()).map_err(internal_error)?;
 
         let mut response: Response<String> = Response::default();
         response.headers_mut().insert(header::SET_COOKIE, header_cookie_value);
 
-        return Ok(response)
+        Ok(response)
     }
 }
 
 pub async fn sign_out() {
-    // todo: implement
+    todo!()
+}
+
+pub async fn me(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>
+) -> Result<Json<User>, (StatusCode, String)> {
+    let conn = state.pool.get().await.map_err(internal_error)?;
+
+    let query = &format!(
+        "SELECT id, username, role FROM {} WHERE id = $1",
+        crate::USER_TABLE_NAME
+    );
+
+    let user_row = conn.query_one(query, &[&user.id]).await.map_err(internal_error)?;
+
+    let user = User {
+        id: user_row.get(0),
+        username: user_row.get(1),
+        role: user_row.get::<usize, i16>(2).into()
+    };
+
+    Ok(Json(user))
 }
