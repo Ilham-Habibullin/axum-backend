@@ -9,8 +9,11 @@ use tokio_postgres::types::ToSql;
 
 use crate::types::{internal_error, AppState, Pagination};
 
-use crate::modules::notes::types::*;
-use crate::modules::users::types::User;
+use crate::{
+    modules::notes::types::*,
+    modules::users::types::User,
+    NOTES_TABLE_NAME
+};
 
 pub async fn get_notes(
     State(state): State<AppState>,
@@ -22,10 +25,10 @@ pub async fn get_notes(
     let limit = pagination.0.limit;
     let offset = pagination.0.offset;
 
-    let query_notes = format!("SELECT id, text FROM {} WHERE user_id=$3 LIMIT $1 OFFSET $2", crate::NOTES_TABLE_NAME);
+    let query_notes = format!("SELECT id, text FROM {NOTES_TABLE_NAME} WHERE user_id=$3 LIMIT $1 OFFSET $2");
     let params_notes: Vec<&(dyn ToSql + Sync)> = vec![&limit, &offset, &user.id];
 
-    let query_count = format!("SELECT count(*) FROM {} WHERE user_id=$1", crate::NOTES_TABLE_NAME);
+    let query_count = format!("SELECT count(*) FROM {NOTES_TABLE_NAME} WHERE user_id=$1");
     let params_count: Vec<&(dyn ToSql + Sync)> = vec![&user.id];
 
     let (rows, row_count) = tokio::try_join!(
@@ -56,7 +59,7 @@ pub async fn delete_note(
     let note_id = payload.0.id;
 
     let row = conn.query_one(
-        &format!("DELETE FROM {} WHERE id=$1 AND user_id=$2 RETURNING id, text", crate::NOTES_TABLE_NAME),
+        &format!("DELETE FROM {NOTES_TABLE_NAME} WHERE id=$1 AND user_id=$2 RETURNING id, text"),
         &[&note_id, &user.id]
     ).await.map_err(internal_error)?;
 
@@ -76,7 +79,7 @@ pub async fn create_note(
     let conn = state.pool.get().await.map_err(internal_error)?;
 
     let row = conn.query_one(
-        &format!("INSERT INTO {} (text, user_id) VALUES ($1, $2) RETURNING id, text", crate::NOTES_TABLE_NAME),
+        &format!("INSERT INTO {NOTES_TABLE_NAME} (text, user_id) VALUES ($1, $2) RETURNING id, text"),
         &[&body.text, &user.id]
     ).await.map_err(internal_error)?;
 

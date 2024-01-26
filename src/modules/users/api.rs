@@ -12,8 +12,10 @@ use crate::types::{
     Pagination
 };
 
-use crate::modules::users::types::*;
-
+use crate::{
+    modules::users::types::*,
+    USER_TABLE_NAME
+};
 
 
 #[derive(serde::Deserialize)]
@@ -31,11 +33,11 @@ pub async fn get_users(
 
     match role_option.role {
         None => complete_get_user(
-            format!("SELECT id, username, role FROM {} ORDER BY id LIMIT $1 OFFSET $2", crate::USER_TABLE_NAME),
+            format!("SELECT id, username, role FROM {USER_TABLE_NAME} ORDER BY id LIMIT $1 OFFSET $2"),
             vec![&limit, &offset], 
             state).await,
         Some(role) => complete_get_user(
-            format!("SELECT id, username, role FROM {} WHERE role=$3 ORDER BY id LIMIT $1 OFFSET $2 ", crate::USER_TABLE_NAME),
+            format!("SELECT id, username, role FROM {USER_TABLE_NAME} WHERE role=$3 ORDER BY id LIMIT $1 OFFSET $2 "),
             vec![&limit, &offset, &role],
             state).await
     }
@@ -48,7 +50,7 @@ async fn complete_get_user(
 ) -> Result<Response<Body>, (StatusCode, String)> {
     let conn = state.pool.get().await.map_err(internal_error)?;
 
-    let query_count = format!("SELECT count(*) FROM {}", crate::USER_TABLE_NAME);
+    let query_count = format!("SELECT count(*) FROM {USER_TABLE_NAME}");
 
     let (rows, row_count) = tokio::try_join!(
         conn.query(&query_users, &param_users),
@@ -80,7 +82,7 @@ pub async fn delete_user(
 
     let row = conn
         .query_one(
-            &format!("DELETE FROM {} WHERE username=$1 RETURNING id, username", crate::USER_TABLE_NAME),
+            &format!("DELETE FROM {USER_TABLE_NAME} WHERE username=$1 RETURNING id, username"),
             &[&username]
         )
         .await

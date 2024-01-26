@@ -13,8 +13,11 @@ use sha256::digest;
 
 use crate::types::{internal_error, AppState, Roles};
 
-use crate::modules::auth::types::*;
-use crate::modules::users::types::*;
+use crate::{
+    modules::auth::types::*,
+    modules::users::types::*,
+    USER_TABLE_NAME
+};
 
 pub async fn sign_up(
     State(state): State<AppState>,
@@ -30,7 +33,7 @@ pub async fn sign_up(
 
     let user_row = conn
         .query_one(
-            &format!("INSERT INTO {} (username, password) VALUES ($1, $2) RETURNING id, username", crate::USER_TABLE_NAME),
+            &format!("INSERT INTO {USER_TABLE_NAME} (username, password) VALUES ($1, $2) RETURNING id, username"),
             &[&username, &hashed_password]
         )
         .await
@@ -56,10 +59,7 @@ pub async fn sign_in(
 
     let hashed_password = digest(password+salt);
 
-    let query = &format!(
-        "SELECT id, username, password, role FROM {} WHERE username = $1", 
-        crate::USER_TABLE_NAME
-    );
+    let query = &format!("SELECT id, username, password, role FROM {USER_TABLE_NAME} WHERE username = $1");
 
     let user_row = conn.query_one(query, &[&username]).await.map_err(internal_error)?;
 
@@ -118,10 +118,7 @@ pub async fn me(
 ) -> Result<Json<User>, (StatusCode, String)> {
     let conn = state.pool.get().await.map_err(internal_error)?;
 
-    let query = &format!(
-        "SELECT id, username, role FROM {} WHERE id = $1",
-        crate::USER_TABLE_NAME
-    );
+    let query = &format!("SELECT id, username, role FROM {USER_TABLE_NAME} WHERE id = $1");
 
     let user_row = conn.query_one(query, &[&user.id]).await.map_err(internal_error)?;
 
