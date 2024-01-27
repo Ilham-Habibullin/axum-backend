@@ -23,38 +23,66 @@ pub struct Role {
     pub role: Option<i16>,
 }
 
+#[derive(serde::Deserialize)]
+pub struct Search {
+    pub search: Option<String>,
+}
+
 pub async fn get_users(
     pagination: Query<Pagination>,
     role_option: Query<Role>,
+    search_option: Query<Search>,
     state: State<AppState>,
 ) -> Result<Response<Body>, (StatusCode, String)> {
     let limit = pagination.0.limit;
     let offset = pagination.0.offset;
 
-    match role_option.role {
-        None => complete_get_user(
-            format!("SELECT id, username, role FROM {USER_TABLE_NAME} ORDER BY id LIMIT $1 OFFSET $2"),
-            vec![&limit, &offset], 
-            state).await,
-        Some(role) => complete_get_user(
-            format!("SELECT id, username, role FROM {USER_TABLE_NAME} WHERE role=$3 ORDER BY id LIMIT $1 OFFSET $2 "),
-            vec![&limit, &offset, &role],
-            state).await
-    }
-}
+    let mut role_: i16 = 0;
+    let mut search_ = String::default();
 
-async fn complete_get_user(
-    query_users: String,
-    param_users: Vec<&(dyn ToSql + Sync)>,
-    state: State<AppState>
-) -> Result<Response<Body>, (StatusCode, String)> {
+    let mut query_users = format!("SELECT id, username, role FROM {USER_TABLE_NAME}");
+    let mut params_users: Vec<&(dyn ToSql + Sync)> = vec![&limit, &offset];
+
+    let mut query_count = format!("SELECT count(*) FROM {USER_TABLE_NAME}");
+    let mut params_count: Vec<&(dyn ToSql + Sync)> = vec![];
+
+    let mut where_clause_set = false;
+
+    role_option.role.map(|role| {
+        role_ = role;
+
+        query_users += " WHERE role=$3";
+        params_users.push(&role_ as &(dyn ToSql + Sync));
+
+        query_count += " WHERE role=$1";
+        params_count.push(&role_ as &(dyn ToSql + Sync));
+
+        where_clause_set = true;
+    });
+
+    search_option.search.clone().map(|search| {
+        if where_clause_set {
+            query_users += " AND username LIKE $4";
+            query_count += " AND username LIKE $2";
+        } else {
+            query_users += " WHERE username LIKE $3";
+            query_count += " WHERE username LIKE $1";
+        }
+
+        search_ = format!("%{search}%");
+        params_users.push(&search_ as &(dyn ToSql + Sync));
+        params_count.push(&search_ as &(dyn ToSql + Sync));
+
+        where_clause_set = true;
+    });
+
+    query_users += " ORDER BY id LIMIT $1 OFFSET $2";
+
     let conn = state.pool.get().await.map_err(internal_error)?;
 
-    let query_count = format!("SELECT count(*) FROM {USER_TABLE_NAME}");
-
     let (rows, row_count) = tokio::try_join!(
-        conn.query(&query_users, &param_users),
-        conn.query_one(&query_count, &[])
+        conn.query(&query_users, &params_users),
+        conn.query_one(&query_count, &params_count)
     ).map_err(internal_error)?;
 
     let reply: Vec<User> = rows.iter().map(|r| User {
