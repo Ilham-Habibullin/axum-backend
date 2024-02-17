@@ -116,6 +116,12 @@ async fn main() {
              get(get_users)
             .delete(delete_user.layer(from_fn_with_state(Roles::Admin, roles::roles)))
         )
+        .route("/notes",
+             get(get_notes)
+            .delete(delete_note)
+            .post(create_note)
+            .route_layer(from_fn_with_state(state.clone(), auth::auth))
+        )
         .route("/promote",
             post(promote_user)
                 .route_layer(from_fn_with_state(Roles::Basic, roles::roles))
@@ -127,12 +133,6 @@ async fn main() {
                 .route("/signup", post(sign_up))
                 .route("/signin", post(sign_in))
                 .route("/signout", get(sign_out))
-        )
-        .route("/notes",
-             get(get_notes)
-            .delete(delete_note)
-            .post(create_note)
-            .route_layer(from_fn_with_state(state.clone(), auth::auth))
         )
         .with_state(state.clone())
         .layer(cors);
