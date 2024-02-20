@@ -5,13 +5,14 @@ use axum::{
     Json, response::IntoResponse,
     body::Body
 };
+
 use tokio_postgres::types::ToSql;
 
-use crate::types::{internal_error, AppState, Pagination};
-
 use crate::{
+    types::{internal_error, AppState, Pagination},
     modules::notes::types::*,
     modules::users::types::User,
+    modules::common::{Search, SqlParams},
     NOTES_TABLE_NAME
 };
 
@@ -19,17 +20,54 @@ pub async fn get_notes(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     pagination: Query<Pagination>,
+    mut search_option: Query<Search>,
 ) -> Result<Response<Body>, (StatusCode, String)> {
+    let mut query_notes = format!("SELECT id, text FROM {NOTES_TABLE_NAME} WHERE ");
+    let mut query_count = format!("SELECT count(*) FROM {NOTES_TABLE_NAME} WHERE ");
+
+    let mut for_notes_query: SqlParams = vec![("user_id = ", Box::new(user.id))];
+    let mut for_count_query: SqlParams = vec![("user_id = ", Box::new(user.id))];
+
+    if let Some(search) = search_option.search.take() {
+        let search_ = format!("%{search}%");
+        for_notes_query.push(("text LIKE ", Box::new(search_.clone())));
+        for_count_query.push(("text LIKE ", Box::new(search_.clone())));
+    }
+
+    let mut parameters_count = 0;
+
+    let mut params_notes = for_notes_query
+        .iter()
+        .enumerate()
+        .map(|(i, (key, value))| {
+            if i > 0 { query_notes += " AND " }
+            let parameters_number = i + 1;
+            query_notes += &format!("{}${}", key, parameters_number);
+            parameters_count = parameters_number;
+            value.as_ref() as &(dyn ToSql + Sync)
+        })
+        .collect::<Vec<&(dyn ToSql + Sync)>>();
+
+    params_notes.push(&pagination.limit);
+    params_notes.push(&pagination.offset);
+
+    if parameters_count != 0 {
+        query_notes += &format!(" ORDER BY id LIMIT ${} OFFSET ${}", parameters_count + 1, parameters_count + 2);
+    } else {
+        query_notes += " ORDER BY id LIMIT $1 OFFSET $2";
+    }
+
+    let params_count =  for_count_query
+        .iter()
+        .enumerate()
+        .map(|(i, (key, value))| {
+            if i > 0 { query_count += " AND " }
+            query_count += &format!("{}${}", key, i+1);
+            value.as_ref() as &(dyn ToSql + Sync)
+        })
+        .collect::<Vec<&(dyn ToSql + Sync)>>();
+
     let conn = state.pool.get().await.map_err(internal_error)?;
-
-    let limit = pagination.0.limit;
-    let offset = pagination.0.offset;
-
-    let query_notes = format!("SELECT id, text FROM {NOTES_TABLE_NAME} WHERE user_id=$3 LIMIT $1 OFFSET $2");
-    let params_notes: Vec<&(dyn ToSql + Sync)> = vec![&limit, &offset, &user.id];
-
-    let query_count = format!("SELECT count(*) FROM {NOTES_TABLE_NAME} WHERE user_id=$1");
-    let params_count: Vec<&(dyn ToSql + Sync)> = vec![&user.id];
 
     let (rows, row_count) = tokio::try_join!(
         conn.query(&query_notes, &params_notes),

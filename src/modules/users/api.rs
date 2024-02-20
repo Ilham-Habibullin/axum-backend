@@ -1,42 +1,26 @@
-
 use std::usize;
-
-use axum_macros::debug_handler;
 
 use axum::{
     Extension,
     extract::{State, Query},
     http::{StatusCode, HeaderValue, Response},
-    Json, response::IntoResponse, body::Body
+    Json,
+    response::IntoResponse,
+    body::Body,
 };
+
 use tokio_postgres::types::ToSql;
+use crate::modules::common::{Search, SqlParams};
+use crate::types::{internal_error, AppState, Pagination};
 
-use crate::types::{
-    internal_error,
-    AppState,
-    Pagination
-};
-
-use crate::{
-    modules::users::types::*,
-    USER_TABLE_NAME
-};
-
+use crate::modules::users::types::*;
+use crate::USER_TABLE_NAME;
 
 #[derive(serde::Deserialize)]
 pub struct Role {
     pub role: Option<i16>,
 }
 
-#[derive(serde::Deserialize)]
-pub struct Search {
-    pub search: Option<String>,
-}
-
-type QuieryBuildParam = (&'static str, Box<(dyn ToSql + Sync + Send)>);
-type SqlParams = Vec<QuieryBuildParam>;
-
-#[debug_handler]
 pub async fn get_users(
     pagination: Query<Pagination>,
     role_option: Query<Role>,
@@ -46,18 +30,16 @@ pub async fn get_users(
     let mut for_users_query: SqlParams = vec![];
     let mut for_count_query: SqlParams = vec![];
 
-    role_option.role.map(|role| {
+    if let Some(role) = role_option.role {
         for_users_query.push(("role = ", Box::new(role)));
         for_count_query.push(("role = ", Box::new(role)));
-    });
+    }
 
-    search_option.search.take().map(|search| {
+    if let Some(search) = search_option.search.take() {
         let search_ = format!("%{search}%");
         for_users_query.push(("username LIKE ", Box::new(search_.clone())));
         for_count_query.push(("username LIKE ", Box::new(search_.clone())));
-    });
-
-    let conn = state.pool.get().await.map_err(internal_error)?;
+    }
 
     let mut query_users = format!("SELECT id, username, role FROM {USER_TABLE_NAME}");
     let mut query_count = format!("SELECT count(*) FROM {USER_TABLE_NAME}");
@@ -65,7 +47,7 @@ pub async fn get_users(
     if !for_users_query.is_empty() { query_users += " WHERE " }
     if !for_count_query.is_empty() { query_count += " WHERE " }
 
-    let mut parameters_count: usize = 0;
+    let mut parameters_count = 0;
 
     let mut params_users = for_users_query
         .iter()
@@ -82,6 +64,12 @@ pub async fn get_users(
     params_users.push(&pagination.limit);
     params_users.push(&pagination.offset);
 
+    if parameters_count != 0 {
+        query_users += &format!(" ORDER BY id LIMIT ${} OFFSET ${}", parameters_count + 1, parameters_count + 2);
+    } else {
+        query_users += " ORDER BY id LIMIT $1 OFFSET $2";
+    }
+
     let params_count = for_count_query
         .iter()
         .enumerate()
@@ -92,11 +80,8 @@ pub async fn get_users(
         })
         .collect::<Vec<&(dyn ToSql + Sync)>>();
 
-    if parameters_count != 0 {
-        query_users += &format!(" ORDER BY id LIMIT ${} OFFSET ${}", parameters_count + 1, parameters_count + 2);
-    } else {
-        query_users += " ORDER BY id LIMIT $1 OFFSET $2";
-    }
+
+    let conn = state.pool.get().await.map_err(internal_error)?;
 
     let (rows, row_count) = tokio::try_join!(
         conn.query(&query_users, &params_users),
