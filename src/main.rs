@@ -132,7 +132,7 @@ async fn main() {
                 .route("/me", get(me).layer(from_fn_with_state(state.clone(), auth::auth)))
                 .route("/signup", post(sign_up))
                 .route("/signin", post(sign_in))
-                .route("/signout", get(sign_out))
+                .route("/signout", post(sign_out))
         )
         .with_state(state.clone())
         .layer(cors);

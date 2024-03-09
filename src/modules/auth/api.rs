@@ -108,8 +108,20 @@ pub async fn sign_in(
     }
 }
 
-pub async fn sign_out() {
-    todo!()
+pub async fn sign_out() -> Result<impl IntoResponse, (StatusCode, String)> {
+    let cookie = Cookie::build(("token", ""))
+    .path("/")
+    .max_age(time::Duration::hours(0))
+    // .same_site(SameSite::None)
+    .secure(false)
+    .http_only(false);
+
+    let header_cookie_value = HeaderValue::from_str(&cookie.to_string()).map_err(internal_error)?;
+
+    let mut response: Response<String> = Response::default();
+    response.headers_mut().insert(header::SET_COOKIE, header_cookie_value);
+
+    Ok(response)
 }
 
 pub async fn me(
