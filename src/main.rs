@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use axum::{
     Router, routing::{get, post},
     middleware::from_fn_with_state, handler::Handler
@@ -51,11 +53,15 @@ async fn run_migrations(client: &mut Client) {
 }
 
 async fn read_file(filename: &str) -> Result<String, String> {
-    let contents = tokio::fs::read(filename).await.map_err(|e| e.to_string())?;
+    let contents = tokio::fs::read(filename).await.map_err(|e| {
+        format!("reading file {filename} failed with: {e}")
+    })?;
     let parsed = String::from_utf8_lossy(&contents).to_string();
     return Ok(parsed)
 }
 
+
+use dotenvy::dotenv;
 
 
 #[tokio::main]
@@ -68,15 +74,18 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let (postgres_config, jwt_secret, salt) = tokio::try_join!(
-        read_file("postgres"),
+    let (jwt_secret, salt) = tokio::try_join!(
         read_file("jwt_secret"),
         read_file("salt")
     ).unwrap();
 
+    dotenv().ok();
+
     // set up connection pool
-    let manager = PostgresConnectionManager::new_from_stringlike(postgres_config, NoTls).unwrap();
-    let mut client = manager.connect().await.unwrap();
+    let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set.");
+    let config = tokio_postgres::Config::from_str(&url).expect("expect config for postgresql to be Ok");
+    let manager = PostgresConnectionManager::new(config, NoTls);
+    let mut client = manager.connect().await.expect("database will connect");
 
     run_migrations(&mut client).await;
 
